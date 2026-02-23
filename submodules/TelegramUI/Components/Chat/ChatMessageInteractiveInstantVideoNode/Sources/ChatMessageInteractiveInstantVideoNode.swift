@@ -404,6 +404,7 @@ public class ChatMessageInteractiveInstantVideoNode: ASDisplayNode {
                             quote: replyQuote,
                             todoItemId: replyTodoItemId,
                             story: replyStory,
+                            isSummarized: false,
                             parentMessage: item.message,
                             constrainedSize: CGSize(width: availableWidth, height: CGFloat.greatestFiniteMagnitude),
                             animationCache: item.controllerInteraction.presentationContext.animationCache,
@@ -1830,45 +1831,7 @@ public class ChatMessageInteractiveInstantVideoNode: ASDisplayNode {
             return
         }
         
-        let presentationData = item.context.sharedContext.currentPresentationData.with { $0 }
-        let premiumConfiguration = PremiumConfiguration.with(appConfiguration: item.context.currentAppConfiguration.with { $0 })
-        
-        let transcriptionText = transcribedText(message: item.message)
-        if transcriptionText == nil && !item.associatedData.alwaysDisplayTranscribeButton.providedByGroupBoost {
-            if premiumConfiguration.audioTransciptionTrialCount > 0 {
-                if !item.associatedData.isPremium {
-                    if self.presentAudioTranscriptionTooltip(finished: false) {
-                        return
-                    }
-                }
-            } else {
-                guard item.associatedData.isPremium else {
-                    if self.hapticFeedback == nil {
-                        self.hapticFeedback = HapticFeedback()
-                    }
-                    self.hapticFeedback?.impact(.medium)
-                    
-                    let tipController = UndoOverlayController(presentationData: presentationData, content: .universal(animation: "anim_voiceToText", scale: 0.065, colors: [:], title: nil, text: presentationData.strings.Message_AudioTranscription_SubscribeToPremium, customUndoText: presentationData.strings.Message_AudioTranscription_SubscribeToPremiumAction, timeout: nil), elevatedLayout: false, position: .top, animateInAsReplacement: false, action: { action in
-                        if case .undo = action {
-                            let context = item.context
-                            var replaceImpl: ((ViewController) -> Void)?
-                            let controller = context.sharedContext.makePremiumDemoController(context: context, subject: .voiceToText, forceDark: false, action: {
-                                let controller = context.sharedContext.makePremiumIntroController(context: context, source: .settings, forceDark: false, dismissed: nil)
-                                replaceImpl?(controller)
-                            }, dismissed: nil)
-                            replaceImpl = { [weak controller] c in
-                                controller?.replace(with: c)
-                            }
-                            item.controllerInteraction.navigationController()?.pushViewController(controller, animated: true)
-                            
-                            let _ = ApplicationSpecificNotice.incrementAudioTranscriptionSuggestion(accountManager: item.context.sharedContext.accountManager).startStandalone()
-                        }
-                        return false })
-                    item.controllerInteraction.presentControllerInCurrent(tipController, nil)
-                    return
-                }
-            }
-        }
+        // GHOSTGRAM: Premium check removed - local transcription is free!
         
         var shouldBeginTranscription = false
         var shouldExpandNow = false

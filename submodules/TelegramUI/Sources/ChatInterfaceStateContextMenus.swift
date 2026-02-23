@@ -37,6 +37,10 @@ import ChatMessageItemView
 import ChatMessageBubbleItemNode
 import AdsInfoScreen
 import AdsReportScreen
+import LegacyComponents
+import LocalMediaResources
+import MediaResources
+import AVFoundation
  
 private struct MessageContextMenuData {
     let starStatus: Bool?
@@ -647,8 +651,13 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                     if let restrictedText = restrictedText {
                         storeMessageTextInPasteboard(restrictedText, entities: nil)
                     } else {
-                        if let translationState = chatPresentationInterfaceState.translationState, translationState.isEnabled,
-                           let translation = message.attributes.first(where: { ($0 as? TranslationMessageAttribute)?.toLang == translationState.toLang }) as? TranslationMessageAttribute, !translation.text.isEmpty {
+                        var translateToLang: String?
+                        if let translationState = chatPresentationInterfaceState.translationState, translationState.isEnabled {
+                            translateToLang = translationState.toLang
+                        }
+                        if controllerInteraction.summarizedMessageIds.contains(message.id), let attribute = message.attributes.first(where: { $0 is SummarizationMessageAttribute }) as? SummarizationMessageAttribute, let summary = attribute.summaryForLang(translateToLang) {
+                            storeMessageTextInPasteboard(summary.text, entities: summary.entities)
+                        } else if let translateToLang, let translation = message.attributes.first(where: { ($0 as? TranslationMessageAttribute)?.toLang == translateToLang }) as? TranslationMessageAttribute, !translation.text.isEmpty {
                             storeMessageTextInPasteboard(translation.text, entities: translation.entities)
                         } else {
                             storeMessageTextInPasteboard(message.text, entities: messageEntities)
@@ -1178,8 +1187,8 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                     c?.dismiss(completion: {
                         let presentationData = context.sharedContext.currentPresentationData.with { $0 }
                         
-                        controllerInteraction.presentController(standardTextAlertController(
-                            theme: AlertControllerTheme(presentationData: presentationData),
+                        controllerInteraction.presentController(textAlertController(
+                            context: context,
                             title: presentationData.strings.Chat_ScheduledForceSendProcessingVideo_Title,
                             text: presentationData.strings.Chat_ScheduledForceSendProcessingVideo_Text,
                             actions: [
@@ -1282,11 +1291,16 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                                     if let restrictedText = restrictedText {
                                         storeMessageTextInPasteboard(restrictedText, entities: nil)
                                     } else {
-                                        if let translationState = chatPresentationInterfaceState.translationState, translationState.isEnabled,
-                                           let translation = message.attributes.first(where: { ($0 as? TranslationMessageAttribute)?.toLang == translationState.toLang }) as? TranslationMessageAttribute, !translation.text.isEmpty {
+                                        var translateToLang: String?
+                                        if let translationState = chatPresentationInterfaceState.translationState, translationState.isEnabled {
+                                            translateToLang = translationState.toLang
+                                        }
+                                        if controllerInteraction.summarizedMessageIds.contains(message.id), let attribute = message.attributes.first(where: { $0 is SummarizationMessageAttribute }) as? SummarizationMessageAttribute, let summary = attribute.summaryForLang(translateToLang) {
+                                            storeMessageTextInPasteboard(summary.text, entities: summary.entities)
+                                        } else if let translateToLang, let translation = message.attributes.first(where: { ($0 as? TranslationMessageAttribute)?.toLang == translateToLang }) as? TranslationMessageAttribute, !translation.text.isEmpty {
                                             storeMessageTextInPasteboard(translation.text, entities: translation.entities)
                                         } else {
-                                            storeMessageTextInPasteboard(messageText, entities: messageEntities)
+                                            storeMessageTextInPasteboard(message.text, entities: messageEntities)
                                         }
                                     }
                                     
@@ -1355,10 +1369,17 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                         return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Message"), color: theme.actionSheet.primaryTextColor)
                     }, action: { _, f in
                         var text = messageText
-                        if let translationState = chatPresentationInterfaceState.translationState, translationState.isEnabled,
-                           let translation = message.attributes.first(where: { ($0 as? TranslationMessageAttribute)?.toLang == translationState.toLang }) as? TranslationMessageAttribute, !translation.text.isEmpty {
+                        
+                        var translateToLang: String?
+                        if let translationState = chatPresentationInterfaceState.translationState, translationState.isEnabled {
+                            translateToLang = translationState.toLang
+                        }
+                        if controllerInteraction.summarizedMessageIds.contains(message.id), let attribute = message.attributes.first(where: { $0 is SummarizationMessageAttribute }) as? SummarizationMessageAttribute, let summary = attribute.summaryForLang(translateToLang) {
+                            text = summary.text
+                        } else if let translateToLang, let translation = message.attributes.first(where: { ($0 as? TranslationMessageAttribute)?.toLang == translateToLang }) as? TranslationMessageAttribute, !translation.text.isEmpty {
                             text = translation.text
                         }
+                        
                         controllerInteraction.performTextSelectionAction(message, !isCopyProtected, NSAttributedString(string: text), .speak)
                         f(.default)
                     })))
@@ -1392,6 +1413,16 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                     })
                     f(.default)
                 })))
+                
+                // MARK: - Ghostgram: Send as Circle (Video Message)
+                if isVideo, let file = message.media.first(where: { $0 is TelegramMediaFile }) as? TelegramMediaFile {
+                    actions.append(.action(ContextMenuActionItem(text: "Отправить как кружок", icon: { theme in
+                        return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/VideoMessage"), color: theme.actionSheet.primaryTextColor)
+                    }, action: { (controller: ContextControllerProtocol?, dismiss: @escaping (ContextMenuActionResult) -> Void) in
+                        dismiss(.default)
+                        convertVideoToCircleAndSend(context: context, message: message, file: file, controllerInteraction: controllerInteraction)
+                    })))
+                }
             }
         }
         
@@ -1426,16 +1457,8 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             }
         }
         
-        if (loggingSettings.logToFile || loggingSettings.logToConsole) && !downloadableMediaResourceInfos.isEmpty {
-            actions.append(.action(ContextMenuActionItem(text: "Send Logs", icon: { theme in
-                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Message"), color: theme.actionSheet.primaryTextColor)
-            }, action: { _, f in
-                triggerDebugSendLogsUI(context: context, additionalInfo: "User has requested download logs for \(downloadableMediaResourceInfos)", pushController: { c in
-                    controllerInteraction.navigationController()?.pushViewController(c)
-                })
-                f(.default)
-            })))
-        }
+        // REMOVED: Send Logs button
+        
         
         var threadId: Int64?
         var threadMessageCount: Int = 0
@@ -1507,6 +1530,56 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                     interfaceInteraction.setupEditMessage(messages[0].id, { transition in
                         f(.custom(transition))
                     })
+                }
+            })))
+        }
+        
+        // MARK: - Ghostgram: Local Edit (Client-Side Only)
+        // Allows editing any message text locally without sending to server
+        if !message.text.isEmpty {
+            actions.append(.action(ContextMenuActionItem(text: "Изменить локально", icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Edit"), color: theme.actionSheet.primaryTextColor)
+            }, action: { [weak controllerInteraction] _, f in
+                f(.dismissWithoutContent)
+                
+                guard let controllerInteraction = controllerInteraction else { return }
+                
+                let peerId = message.id.peerId.toInt64()
+                let messageId = message.id.id
+                let currentText = LocalEditManager.shared.getLocalEdit(peerId: peerId, messageId: messageId) ?? message.text
+                
+                let alertController = UIAlertController(
+                    title: "Изменить локально",
+                    message: "Это изменение видно только вам и сбросится после перезапуска приложения",
+                    preferredStyle: .alert
+                )
+                
+                alertController.addTextField { textField in
+                    textField.text = currentText
+                    textField.placeholder = "Введите новый текст"
+                }
+                
+                alertController.addAction(UIAlertAction(title: "Отмена", style: .cancel, handler: nil))
+                alertController.addAction(UIAlertAction(title: "Сохранить", style: .default) { [weak alertController] _ in
+                    guard let textField = alertController?.textFields?.first,
+                          let newText = textField.text, !newText.isEmpty else {
+                        return
+                    }
+                    
+                    LocalEditManager.shared.setLocalEdit(peerId: peerId, messageId: messageId, newText: newText)
+                    
+                    // Request UI update
+                    controllerInteraction.requestMessageUpdate(message.id, true)
+                })
+                
+                if let chatControllerNode = controllerInteraction.chatControllerNode() {
+                    if let viewController = chatControllerNode.view.window?.rootViewController {
+                        var topController = viewController
+                        while let presented = topController.presentedViewController {
+                            topController = presented
+                        }
+                        topController.present(alertController, animated: true, completion: nil)
+                    }
                 }
             })))
         }
@@ -2012,6 +2085,33 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
             }
             actions.insert(.custom(ChatReadReportContextItem(context: context, message: message, hasReadReports: false, isEdit: true, stats: MessageReadStats(reactionCount: 0, peers: [], readTimestamps: [:]), action: nil), false), at: 0)
         }
+        
+        // GHOSTGRAM: Show edit history button if message was edited and has saved history
+        if isEdited && EditHistoryManager.shared.hasEditHistory(peerId: message.id.peerId.toInt64(), messageId: message.id.id) {
+            actions.append(.action(ContextMenuActionItem(text: "История", icon: { theme in
+                return generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Edit"), color: theme.actionSheet.primaryTextColor)
+            }, action: { c, f in
+                let editHistory = EditHistoryManager.shared.getEditHistory(peerId: message.id.peerId.toInt64(), messageId: message.id.id)
+                var historyText = "Оригинальные версии:\n\n"
+                for (index, record) in editHistory.enumerated() {
+                    let date = Date(timeIntervalSince1970: TimeInterval(record.editDate))
+                    let formatter = DateFormatter()
+                    formatter.dateStyle = .short
+                    formatter.timeStyle = .short
+                    historyText += "\(index + 1). [\(formatter.string(from: date))]\n\(record.text)\n\n"
+                }
+                
+                c?.dismiss(completion: {
+                    let alertController = textAlertController(
+                        context: context,
+                        title: "История правок",
+                        text: historyText,
+                        actions: [TextAlertAction(type: .defaultAction, title: "OK", action: {})]
+                    )
+                    controllerInteraction.presentController(alertController, nil)
+                })
+            })))
+        }
 
         if canViewAuthor {
             actions.insert(.custom(ChatMessageAuthorContextItem(context: context, message: message, action: { c, f, peer in
@@ -2162,8 +2262,13 @@ func contextMenuForChatPresentationInterfaceState(chatPresentationInterfaceState
                         if let restrictedText = restrictedText {
                             storeMessageTextInPasteboard(restrictedText, entities: nil)
                         } else {
-                            if let translationState = chatPresentationInterfaceState.translationState, translationState.isEnabled,
-                               let translation = message.attributes.first(where: { ($0 as? TranslationMessageAttribute)?.toLang == translationState.toLang }) as? TranslationMessageAttribute, !translation.text.isEmpty {
+                            var translateToLang: String?
+                            if let translationState = chatPresentationInterfaceState.translationState, translationState.isEnabled {
+                                translateToLang = translationState.toLang
+                            }
+                            if controllerInteraction.summarizedMessageIds.contains(message.id), let attribute = message.attributes.first(where: { $0 is SummarizationMessageAttribute }) as? SummarizationMessageAttribute, let summary = attribute.summaryForLang(translateToLang) {
+                                storeMessageTextInPasteboard(summary.text, entities: summary.entities)
+                            } else if let translateToLang, let translation = message.attributes.first(where: { ($0 as? TranslationMessageAttribute)?.toLang == translateToLang }) as? TranslationMessageAttribute, !translation.text.isEmpty {
                                 storeMessageTextInPasteboard(translation.text, entities: translation.entities)
                             } else {
                                 storeMessageTextInPasteboard(message.text, entities: messageEntities)
@@ -2331,7 +2436,7 @@ func chatAvailableMessageActionsImpl(engine: TelegramEngine, accountPeerId: Peer
                     }
                 }
                 
-                if message.isCopyProtected() || message.containsSecretMedia {
+                if (message.isCopyProtected() || message.containsSecretMedia) && !MiscSettingsManager.shared.shouldBypassCopyProtection {
                     isCopyProtected = true
                 }
                 for media in message.media {
@@ -2437,7 +2542,8 @@ func chatAvailableMessageActionsImpl(engine: TelegramEngine, accountPeerId: Peer
                             }
                         }
                         if !message.containsSecretMedia && !isAction && !isShareProtected {
-                            if message.id.peerId.namespace != Namespaces.Peer.SecretChat && !message.isCopyProtected() {
+                            let copyProtectedCheck = message.isCopyProtected() && !MiscSettingsManager.shared.shouldBypassCopyProtection
+                            if message.id.peerId.namespace != Namespaces.Peer.SecretChat && !copyProtectedCheck {
                                 if !(message.flags.isSending || message.flags.contains(.Failed)) {
                                     optionsMap[id]!.insert(.forward)
                                 }
@@ -2453,7 +2559,8 @@ func chatAvailableMessageActionsImpl(engine: TelegramEngine, accountPeerId: Peer
                         }
                     } else if let group = peer as? TelegramGroup {
                         if message.id.peerId.namespace != Namespaces.Peer.SecretChat && !message.containsSecretMedia {
-                            if !isAction && !message.isCopyProtected() && !isShareProtected {
+                            let copyProtectedCheck = message.isCopyProtected() && !MiscSettingsManager.shared.shouldBypassCopyProtection
+                            if !isAction && !copyProtectedCheck && !isShareProtected {
                                 if !(message.flags.isSending || message.flags.contains(.Failed)) {
                                     optionsMap[id]!.insert(.forward)
                                 }
@@ -2472,7 +2579,8 @@ func chatAvailableMessageActionsImpl(engine: TelegramEngine, accountPeerId: Peer
                             optionsMap[id]!.insert(.report)
                         }
                     } else if let user = peer as? TelegramUser {
-                        if !isScheduled && message.id.peerId.namespace != Namespaces.Peer.SecretChat && !message.containsSecretMedia && !isAction && !message.id.peerId.isReplies && !message.isCopyProtected() && !isShareProtected {
+                        let copyProtectedCheck = message.isCopyProtected() && !MiscSettingsManager.shared.shouldBypassCopyProtection
+                        if !isScheduled && message.id.peerId.namespace != Namespaces.Peer.SecretChat && !message.containsSecretMedia && !isAction && !message.id.peerId.isReplies && !copyProtectedCheck && !isShareProtected {
                             if !(message.flags.isSending || message.flags.contains(.Failed)) {
                                 optionsMap[id]!.insert(.forward)
                             }
@@ -3858,5 +3966,224 @@ private final class ChatRateTranscriptionContextItemNode: ASDisplayNode, Context
     
     func actionNode(at point: CGPoint) -> ContextActionNodeProtocol {
         return self
+    }
+}
+
+// MARK: - Ghostgram: Video to Circle Conversion Helper
+private func convertVideoToCircleAndSend(
+    context: AccountContext,
+    message: Message,
+    file: TelegramMediaFile,
+    controllerInteraction: ChatControllerInteraction
+) {
+    // Show progress
+    controllerInteraction.displayUndo(.info(title: nil, text: "Конвертация в кружок...", timeout: 5.0, customUndoText: nil))
+    
+    // Get video file path
+    let resourcePath = context.account.postbox.mediaBox.completedResourcePath(file.resource)
+    
+    guard let videoPath = resourcePath, FileManager.default.fileExists(atPath: videoPath) else {
+        controllerInteraction.displayUndo(.info(title: "Ошибка", text: "Видео ещё не загружено. Откройте его для загрузки.", timeout: nil, customUndoText: nil))
+        return
+    }
+    
+    // Get video dimensions
+    var videoDimensions = CGSize(width: 240, height: 240)
+    for attr in file.attributes {
+        switch attr {
+        case let .Video(_, size, _, _, _, _):
+            videoDimensions = size.cgSize
+        default:
+            break
+        }
+    }
+    
+    // Create square crop (center crop to 1:1 aspect ratio)
+    let minDim = min(videoDimensions.width, videoDimensions.height)
+    let cropX = (videoDimensions.width - minDim) / 2
+    let cropY = (videoDimensions.height - minDim) / 2
+    let cropRect = CGRect(x: cropX, y: cropY, width: minDim, height: minDim)
+    
+    // Create adjustments for video message format
+    let adjustments = TGVideoEditAdjustments(
+        originalSize: videoDimensions,
+        cropRect: cropRect,
+        cropOrientation: .up,
+        cropRotation: 0.0,
+        cropLockedAspectRatio: 1.0,
+        cropMirrored: false,
+        trimStartValue: 0.0,
+        trimEndValue: 0.0,
+        toolValues: nil,
+        paintingData: nil,
+        sendAsGif: false,
+        preset: TGMediaVideoConversionPresetVideoMessage
+    )
+    
+    // Generate output path
+    let outputPath = NSTemporaryDirectory() + "circle_\(Int64.random(in: Int64.min...Int64.max)).mp4"
+    
+    print("[Ghostgram Circle] Starting conversion from: \(videoPath)")
+    print("[Ghostgram Circle] Output path: \(outputPath)")
+    print("[Ghostgram Circle] Video dimensions: \(videoDimensions)")
+    
+    // Start conversion in background
+    DispatchQueue.global(qos: .userInitiated).async {
+        // AVFoundation needs file extension to detect format
+        // Postbox stores files without extension, so copy to temp with .mp4
+        let tempSourcePath = NSTemporaryDirectory() + "source_\(Int64.random(in: Int64.min...Int64.max)).mp4"
+        
+        do {
+            try FileManager.default.copyItem(atPath: videoPath, toPath: tempSourcePath)
+            print("[Ghostgram Circle] Copied to temp with extension: \(tempSourcePath)")
+        } catch {
+            print("[Ghostgram Circle] ERROR: Failed to copy file: \(error)")
+            DispatchQueue.main.async {
+                controllerInteraction.displayUndo(.info(title: "Ошибка", text: "Не удалось подготовить видео", timeout: nil, customUndoText: nil))
+            }
+            return
+        }
+        
+        let videoUrl = URL(fileURLWithPath: tempSourcePath)
+        let avAsset = AVURLAsset(url: videoUrl)
+        
+        print("[Ghostgram Circle] Created AVAsset, starting conversion...")
+        
+        // Use TGMediaVideoConverter with correct signature
+        guard let signal = TGMediaVideoConverter.convert(
+            avAsset,
+            adjustments: adjustments,
+            path: outputPath,
+            watcher: nil,
+            entityRenderer: nil
+        ) else {
+            print("[Ghostgram Circle] ERROR: Failed to create conversion signal!")
+            DispatchQueue.main.async {
+                controllerInteraction.displayUndo(.info(title: "Ошибка", text: "Не удалось запустить конвертацию", timeout: nil, customUndoText: nil))
+            }
+            return
+        }
+        
+        print("[Ghostgram Circle] Conversion signal created, starting...")
+        
+        // Use SBlockDisposable instead to keep signal alive
+        let disposable = signal.start(next: { result in
+            print("[Ghostgram Circle] Got result: \(String(describing: result))")
+            
+            guard let result = result as? TGMediaVideoConversionResult,
+                  let resultUrl = result.fileURL else {
+                print("[Ghostgram Circle] ERROR: Result is not TGMediaVideoConversionResult or no fileURL")
+                DispatchQueue.main.async {
+                    controllerInteraction.displayUndo(.info(title: "Ошибка", text: "Не удалось конвертировать видео", timeout: nil, customUndoText: nil))
+                }
+                return
+            }
+            
+            print("[Ghostgram Circle] Conversion SUCCESS! File: \(resultUrl.path)")
+            
+            let finalDuration = result.duration
+            let finalDimensions = result.dimensions
+            
+            DispatchQueue.main.async {
+                // Create preview image
+                var previewRepresentations: [TelegramMediaImageRepresentation] = []
+                if let previewImage = result.coverImage {
+                    let resource = LocalFileMediaResource(fileId: Int64.random(in: Int64.min...Int64.max))
+                    let thumbnailSize = CGSize(width: 240, height: 240)
+                    if let thumbnailImage = TGScaleImageToPixelSize(previewImage, thumbnailSize),
+                       let thumbnailData = thumbnailImage.jpegData(compressionQuality: 0.4) {
+                        context.account.postbox.mediaBox.storeResourceData(resource.id, data: thumbnailData)
+                        previewRepresentations.append(TelegramMediaImageRepresentation(
+                            dimensions: PixelDimensions(thumbnailSize),
+                            resource: resource,
+                            progressiveSizes: [],
+                            immediateThumbnailData: nil,
+                            hasVideo: false,
+                            isPersonal: false
+                        ))
+                    }
+                }
+                
+                // Create local resource for converted video
+                let videoResource = LocalFileVideoMediaResource(
+                    randomId: Int64.random(in: Int64.min...Int64.max),
+                    path: resultUrl.path,
+                    adjustments: nil
+                )
+                
+                // Create TelegramMediaFile with instantRoundVideo flag
+                let media = TelegramMediaFile(
+                    fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: Int64.random(in: Int64.min...Int64.max)),
+                    partialReference: nil,
+                    resource: videoResource,
+                    previewRepresentations: previewRepresentations,
+                    videoThumbnails: [],
+                    immediateThumbnailData: nil,
+                    mimeType: "video/mp4",
+                    size: nil,
+                    attributes: [
+                        .FileName(fileName: "video.mp4"),
+                        .Video(duration: finalDuration, size: PixelDimensions(finalDimensions), flags: [.instantRoundVideo], preloadSize: nil, coverTime: nil, videoCodec: nil)
+                    ],
+                    alternativeRepresentations: []
+                )
+                
+                // Create message
+                let outMessage: EnqueueMessage = .message(
+                    text: "",
+                    attributes: [],
+                    inlineStickers: [:],
+                    mediaReference: .standalone(media: media),
+                    threadId: nil,
+                    replyToMessageId: nil,
+                    replyToStoryId: nil,
+                    localGroupingKey: nil,
+                    correlationId: nil,
+                    bubbleUpEmojiOrStickersets: []
+                )
+                
+                print("[Ghostgram Circle] Sending message...")
+                
+                // Send message
+                let _ = enqueueMessages(account: context.account, peerId: message.id.peerId, messages: [outMessage]).start()
+                
+                // Show success
+                controllerInteraction.displayUndo(.succeed(text: "Кружок отправлен!", timeout: nil, customUndoText: nil))
+            }
+        }, error: { error in
+            print("[Ghostgram Circle] ERROR in conversion: \(String(describing: error))")
+            DispatchQueue.main.async {
+                controllerInteraction.displayUndo(.info(title: "Ошибка", text: "Не удалось конвертировать видео", timeout: nil, customUndoText: nil))
+            }
+        }, completed: {
+            print("[Ghostgram Circle] Conversion completed callback!")
+        })
+        
+        // Keep disposable alive - hold reference until task completes
+        // This is a workaround for ObjC signal disposal
+        DispatchQueue.main.async {
+            CircleConversionHolder.shared.add(disposable)
+        }
+    }
+}
+
+// Helper class to hold conversion disposables
+private final class CircleConversionHolder {
+    static let shared = CircleConversionHolder()
+    private var disposables: [AnyObject] = []
+    private let lock = NSLock()
+    
+    func add(_ disposable: AnyObject?) {
+        guard let disposable = disposable else { return }
+        lock.lock()
+        disposables.append(disposable)
+        lock.unlock()
+        
+        // Auto-cleanup after 2 minutes
+        DispatchQueue.main.asyncAfter(deadline: .now() + 120) { [weak self] in
+            self?.lock.lock()
+            self?.disposables.removeAll { $0 === disposable }
+            self?.lock.unlock()
+        }
     }
 }

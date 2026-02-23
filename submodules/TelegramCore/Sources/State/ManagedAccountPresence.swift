@@ -43,8 +43,18 @@ private final class AccountPresenceManagerImpl {
     }
     
     private func updatePresence(_ isOnline: Bool) {
+        // GHOST MODE: Completely block status updates to freeze "last seen" time
+        if GhostModeManager.shared.shouldHideOnlineStatus {
+            self.onlineTimer?.invalidate()
+            self.onlineTimer = nil
+            return
+        }
+        
+        // ALWAYS ONLINE: Force online status when enabled
+        let effectiveOnline = MiscSettingsManager.shared.shouldAlwaysBeOnline ? true : isOnline
+        
         let request: Signal<Api.Bool, MTRpcError>
-        if isOnline {
+        if effectiveOnline {
             let timer = SignalKitTimer(timeout: 30.0, repeat: false, completion: { [weak self] in
                 guard let strongSelf = self else {
                     return

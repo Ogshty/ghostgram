@@ -12,6 +12,7 @@ import ReactionButtonListComponent
 import ReactionImageComponent
 import AnimationCache
 import MultiAnimationRenderer
+import TelegramStringFormatting
 
 private func maybeAddRotationAnimation(_ layer: CALayer, duration: Double) {
     if let _ = layer.animation(forKey: "clockFrameAnimation") {
@@ -197,8 +198,10 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
         var messageEffect: AvailableMessageEffects.MessageEffect?
         var replyCount: Int
         var starsCount: Int64?
+        var tonAmount: Int64?
         var isPinned: Bool
         var hasAutoremove: Bool
+        var isDeleted: Bool
         var canViewReactionList: Bool
         var animationCache: AnimationCache
         var animationRenderer: MultiAnimationRenderer
@@ -222,8 +225,10 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
             messageEffect: AvailableMessageEffects.MessageEffect?,
             replyCount: Int,
             starsCount: Int64?,
+            tonAmount: Int64? = nil,
             isPinned: Bool,
             hasAutoremove: Bool,
+            isDeleted: Bool = false,
             canViewReactionList: Bool,
             animationCache: AnimationCache,
             animationRenderer: MultiAnimationRenderer
@@ -246,8 +251,10 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
             self.messageEffect = messageEffect
             self.replyCount = replyCount
             self.starsCount = starsCount
+            self.tonAmount = tonAmount
             self.isPinned = isPinned
             self.hasAutoremove = hasAutoremove
+            self.isDeleted = isDeleted
             self.canViewReactionList = canViewReactionList
             self.animationCache = animationCache
             self.animationRenderer = animationRenderer
@@ -270,6 +277,7 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
     private var replyCountNode: TextNode?
     private var starsIcon: ASImageNode?
     private var starsCountNode: TextNode?
+    private var deletedIcon: ASImageNode?
 
     private var type: ChatMessageDateAndStatusType?
     private var theme: ChatPresentationThemeData?
@@ -417,8 +425,10 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
                 } else if arguments.isPinned {
                     repliesImage = graphics.incomingDateAndStatusPinnedIcon
                 }
-                if (arguments.starsCount ?? 0)  != 0 {
+                if (arguments.starsCount ?? 0) != 0 {
                     starsImage = graphics.incomingDateAndStatusStarsIcon
+                } else if (arguments.tonAmount ?? 0) != 0 {
+                    starsImage = graphics.incomingDateAndStatusTonIcon
                 }
             case let .BubbleOutgoing(status):
                 dateColor = arguments.presentationData.theme.theme.chat.message.outgoing.secondaryTextColor
@@ -438,6 +448,8 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
                 }
                 if (arguments.starsCount ?? 0)  != 0 {
                     starsImage = graphics.outgoingDateAndStatusStarsIcon
+                } else if (arguments.tonAmount ?? 0)  != 0 {
+                    starsImage = graphics.outgoingDateAndStatusTonIcon
                 }
             case .ImageIncoming:
                 dateColor = arguments.presentationData.theme.theme.chat.message.mediaDateAndStatusTextColor
@@ -457,6 +469,8 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
                 }
                 if (arguments.starsCount ?? 0)  != 0 {
                     starsImage = graphics.mediaStarsIcon
+                } else if (arguments.tonAmount ?? 0)  != 0 {
+                    starsImage = graphics.mediaTonIcon
                 }
             case let .ImageOutgoing(status):
                 dateColor = arguments.presentationData.theme.theme.chat.message.mediaDateAndStatusTextColor
@@ -477,6 +491,8 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
                 }
                 if (arguments.starsCount ?? 0)  != 0 {
                     starsImage = graphics.mediaStarsIcon
+                } else if (arguments.tonAmount ?? 0)  != 0 {
+                    starsImage = graphics.mediaTonIcon
                 }
             case .FreeIncoming:
                 let serviceColor = serviceMessageColorComponents(theme: arguments.presentationData.theme.theme, wallpaper: arguments.presentationData.theme.wallpaper)
@@ -498,6 +514,8 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
                 }
                 if (arguments.starsCount ?? 0)  != 0 {
                     starsImage = graphics.freeStarsIcon
+                } else if (arguments.tonAmount ?? 0)  != 0 {
+                    starsImage = graphics.freeTonIcon
                 }
             case let .FreeOutgoing(status):
                 let serviceColor = serviceMessageColorComponents(theme: arguments.presentationData.theme.theme, wallpaper: arguments.presentationData.theme.wallpaper)
@@ -519,6 +537,8 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
                 }
                 if (arguments.starsCount ?? 0)  != 0 {
                     starsImage = graphics.freeStarsIcon
+                } else if (arguments.tonAmount ?? 0)  != 0 {
+                    starsImage = graphics.freeTonIcon
                 }
             }
             
@@ -584,6 +604,36 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
                 starsIconSize = starsImage.size
             } else {
                 currentStarsIcon = nil
+            }
+            
+            // ANTIDELETE: Deleted message icon
+            var currentDeletedIcon = self?.deletedIcon
+            var deletedIconSize = CGSize()
+            if arguments.isDeleted {
+                if currentDeletedIcon == nil {
+                    let iconNode = ASImageNode()
+                    iconNode.isLayerBacked = true
+                    iconNode.displayWithoutProcessing = true
+                    iconNode.displaysAsynchronously = false
+                    currentDeletedIcon = iconNode
+                }
+                // Use trash icon from bundle or create simple one
+                let deletedImage = UIImage(bundleImageName: "Chat/Message/DeletedIcon") ?? generateTintedImage(image: UIImage(systemName: "trash"), color: dateColor)
+                deletedIconSize = deletedImage?.size ?? CGSize(width: 10, height: 10)
+                // Scale down the image
+                if let img = deletedImage {
+                    let scaledSize = CGSize(width: 10, height: 10)
+                    UIGraphicsBeginImageContextWithOptions(scaledSize, false, 0.0)
+                    img.draw(in: CGRect(origin: .zero, size: scaledSize))
+                    let scaledImage = UIGraphicsGetImageFromCurrentImageContext()
+                    UIGraphicsEndImageContext()
+                    currentDeletedIcon?.image = scaledImage
+                    deletedIconSize = scaledSize
+                } else {
+                    currentDeletedIcon?.image = deletedImage
+                }
+            } else {
+                currentDeletedIcon = nil
             }
             
             if let outgoingStatus = outgoingStatus {
@@ -717,7 +767,7 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
                 
                 let layoutAndApply = makeReplyCountLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: countString, font: dateFont, textColor: dateColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .end, constrainedSize: CGSize(width: 100.0, height: 100.0)))
                 reactionInset += 14.0 + layoutAndApply.0.size.width + 4.0
-                if arguments.starsCount != nil {
+                if arguments.starsCount != nil || arguments.tonAmount != nil {
                     reactionInset += 3.0
                 }
                 replyCountLayoutAndApply = layoutAndApply
@@ -738,15 +788,26 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
                 let layoutAndApply = makeStarsCountLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: countString, font: dateFont, textColor: dateColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .end, constrainedSize: CGSize(width: 100.0, height: 100.0)))
                 reactionInset += 14.0 + layoutAndApply.0.size.width + 4.0
                 starsCountLayoutAndApply = layoutAndApply
+            } else if let tonAmount = arguments.tonAmount, tonAmount > 0 {
+                let countString = formatTonAmountText(tonAmount, dateTimeFormat: arguments.presentationData.dateTimeFormat)
+                let layoutAndApply = makeStarsCountLayout(TextNodeLayoutArguments(attributedString: NSAttributedString(string: countString, font: dateFont, textColor: dateColor), backgroundColor: nil, maximumNumberOfLines: 1, truncationType: .end, constrainedSize: CGSize(width: 100.0, height: 100.0)))
+                reactionInset += 14.0 + layoutAndApply.0.size.width + 4.0
+                starsCountLayoutAndApply = layoutAndApply
             }
             
             if arguments.messageEffect != nil {
                 reactionInset += 13.0
             }
             
+            // ANTIDELETE: Add deleted icon space
+            var deletedIconWidth: CGFloat = 0.0
+            if arguments.isDeleted {
+                deletedIconWidth = deletedIconSize.width + 3.0
+            }
+            
             leftInset += reactionInset
             
-            let layoutSize = CGSize(width: leftInset + impressionWidth + date.size.width + statusWidth + backgroundInsets.left + backgroundInsets.right, height: date.size.height + backgroundInsets.top + backgroundInsets.bottom)
+            let layoutSize = CGSize(width: leftInset + deletedIconWidth + impressionWidth + date.size.width + statusWidth + backgroundInsets.left + backgroundInsets.right, height: date.size.height + backgroundInsets.top + backgroundInsets.bottom)
             
             let verticalReactionsInset: CGFloat
             let verticalInset: CGFloat
@@ -1089,7 +1150,22 @@ public class ChatMessageDateAndStatusNode: ASDisplayNode {
                             strongSelf.impressionIcon = nil
                         }
                         
-                        animation.animator.updateFrame(layer: strongSelf.dateNode.layer, frame: CGRect(origin: CGPoint(x: leftOffset + leftInset + backgroundInsets.left + impressionWidth, y: backgroundInsets.top + 1.0 + offset + verticalInset), size: date.size), completion: nil)
+                        // ANTIDELETE: Position deleted icon
+                        if let currentDeletedIcon = currentDeletedIcon {
+                            let deletedIconFrame = CGRect(origin: CGPoint(x: leftOffset + leftInset + backgroundInsets.left + impressionWidth, y: backgroundInsets.top + 1.0 + offset + verticalInset + floor((date.size.height - deletedIconSize.height) / 2.0)), size: deletedIconSize)
+                            if currentDeletedIcon.supernode == nil {
+                                strongSelf.deletedIcon = currentDeletedIcon
+                                strongSelf.addSubnode(currentDeletedIcon)
+                                currentDeletedIcon.frame = deletedIconFrame
+                            } else {
+                                animation.animator.updateFrame(layer: currentDeletedIcon.layer, frame: deletedIconFrame, completion: nil)
+                            }
+                        } else if let deletedIcon = strongSelf.deletedIcon {
+                            deletedIcon.removeFromSupernode()
+                            strongSelf.deletedIcon = nil
+                        }
+                        
+                        animation.animator.updateFrame(layer: strongSelf.dateNode.layer, frame: CGRect(origin: CGPoint(x: leftOffset + leftInset + backgroundInsets.left + impressionWidth + deletedIconWidth, y: backgroundInsets.top + 1.0 + offset + verticalInset), size: date.size), completion: nil)
                         
                         if let clockFrameNode = clockFrameNode {
                             let clockPosition = CGPoint(x: leftOffset + backgroundInsets.left + clockPosition.x + reactionInset, y: backgroundInsets.top + clockPosition.y + verticalInset)

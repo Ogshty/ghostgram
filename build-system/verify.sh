@@ -7,7 +7,7 @@ export DISTRIBUTION_CODE_SIGN_IDENTITY="iPhone Distribution: Digital Fortress LL
 export DEVELOPMENT_TEAM="C67CF9S4VU"
 
 export API_ID="8"
-export API_HASH="YOUR_API_HASH"
+export API_HASH="7245de8e747a0d6fbe11f7cc14fcc0bb"
 
 export BUNDLE_ID="ph.telegra.Telegraph"
 export APP_CENTER_ID="0"

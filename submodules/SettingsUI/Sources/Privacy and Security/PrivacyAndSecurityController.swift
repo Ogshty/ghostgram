@@ -45,8 +45,11 @@ private final class PrivacyAndSecurityControllerArguments {
     let openEmailSettings: (String?) -> Void
     let openMessagePrivacy: () -> Void
     let openGiftsPrivacy: () -> Void
+    let openDeletedMessages: () -> Void
+    let openGhostMode: () -> Void
+    let openMisc: () -> Void
     
-    init(account: Account, openBlockedUsers: @escaping () -> Void, openLastSeenPrivacy: @escaping () -> Void, openGroupsPrivacy: @escaping () -> Void, openVoiceCallPrivacy: @escaping () -> Void, openProfilePhotoPrivacy: @escaping () -> Void, openForwardPrivacy: @escaping () -> Void, openPhoneNumberPrivacy: @escaping () -> Void, openVoiceMessagePrivacy: @escaping () -> Void, openBioPrivacy: @escaping () -> Void, openBirthdayPrivacy: @escaping () -> Void, openSavedMusicPrivacy: @escaping () -> Void, openPasscode: @escaping () -> Void, openTwoStepVerification: @escaping (TwoStepVerificationAccessConfiguration?) -> Void, openPasskeys: @escaping () -> Void, openActiveSessions: @escaping () -> Void, toggleArchiveAndMuteNonContacts: @escaping (Bool) -> Void, setupAccountAutoremove: @escaping () -> Void, setupMessageAutoremove: @escaping () -> Void, openDataSettings: @escaping () -> Void, openEmailSettings: @escaping (String?) -> Void, openMessagePrivacy: @escaping () -> Void, openGiftsPrivacy: @escaping () -> Void) {
+    init(account: Account, openBlockedUsers: @escaping () -> Void, openLastSeenPrivacy: @escaping () -> Void, openGroupsPrivacy: @escaping () -> Void, openVoiceCallPrivacy: @escaping () -> Void, openProfilePhotoPrivacy: @escaping () -> Void, openForwardPrivacy: @escaping () -> Void, openPhoneNumberPrivacy: @escaping () -> Void, openVoiceMessagePrivacy: @escaping () -> Void, openBioPrivacy: @escaping () -> Void, openBirthdayPrivacy: @escaping () -> Void, openSavedMusicPrivacy: @escaping () -> Void, openPasscode: @escaping () -> Void, openTwoStepVerification: @escaping (TwoStepVerificationAccessConfiguration?) -> Void, openPasskeys: @escaping () -> Void, openActiveSessions: @escaping () -> Void, toggleArchiveAndMuteNonContacts: @escaping (Bool) -> Void, setupAccountAutoremove: @escaping () -> Void, setupMessageAutoremove: @escaping () -> Void, openDataSettings: @escaping () -> Void, openEmailSettings: @escaping (String?) -> Void, openMessagePrivacy: @escaping () -> Void, openGiftsPrivacy: @escaping () -> Void, openDeletedMessages: @escaping () -> Void, openGhostMode: @escaping () -> Void, openMisc: @escaping () -> Void) {
         self.account = account
         self.openBlockedUsers = openBlockedUsers
         self.openLastSeenPrivacy = openLastSeenPrivacy
@@ -70,6 +73,9 @@ private final class PrivacyAndSecurityControllerArguments {
         self.openEmailSettings = openEmailSettings
         self.openMessagePrivacy = openMessagePrivacy
         self.openGiftsPrivacy = openGiftsPrivacy
+        self.openDeletedMessages = openDeletedMessages
+        self.openGhostMode = openGhostMode
+        self.openMisc = openMisc
     }
 }
 
@@ -81,6 +87,9 @@ private enum PrivacyAndSecuritySection: Int32 {
     case messageAutoremove
     case dataSettings
     case loginEmail
+    case antiDelete
+    case ghostMode
+    case misc
 }
 
 public enum PrivacyAndSecurityEntryTag: ItemListItemTag {
@@ -130,6 +139,12 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
     case messageAutoremoveInfo(PresentationTheme, String)
     case dataSettings(PresentationTheme, String)
     case dataSettingsInfo(PresentationTheme, String)
+    case deletedMessages(PresentationTheme, String, String)
+    case deletedMessagesInfo(PresentationTheme, String)
+    case ghostMode(PresentationTheme, String, String)
+    case ghostModeInfo(PresentationTheme, String)
+    case misc(PresentationTheme, String, String)
+    case miscInfo(PresentationTheme, String)
     
     var section: ItemListSectionId {
         switch self {
@@ -145,6 +160,12 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
             return PrivacyAndSecuritySection.account.rawValue
         case .dataSettings, .dataSettingsInfo:
             return PrivacyAndSecuritySection.dataSettings.rawValue
+        case .deletedMessages, .deletedMessagesInfo:
+            return PrivacyAndSecuritySection.antiDelete.rawValue
+        case .ghostMode, .ghostModeInfo:
+            return PrivacyAndSecuritySection.ghostMode.rawValue
+        case .misc, .miscInfo:
+            return PrivacyAndSecuritySection.misc.rawValue
         }
     }
     
@@ -214,6 +235,18 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
                 return 31
             case .dataSettingsInfo:
                 return 32
+            case .deletedMessages:
+                return 33
+            case .deletedMessagesInfo:
+                return 34
+            case .ghostMode:
+                return 35
+            case .ghostModeInfo:
+                return 36
+            case .misc:
+                return 37
+            case .miscInfo:
+                return 38
         }
     }
     
@@ -411,6 +444,42 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
                 } else {
                     return false
                 }
+            case let .deletedMessages(lhsTheme, lhsText, lhsValue):
+                if case let .deletedMessages(rhsTheme, rhsText, rhsValue) = rhs, lhsTheme === rhsTheme, lhsText == rhsText, lhsValue == rhsValue {
+                    return true
+                } else {
+                    return false
+                }
+            case let .deletedMessagesInfo(lhsTheme, lhsText):
+                if case let .deletedMessagesInfo(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
+                    return true
+                } else {
+                    return false
+                }
+            case let .ghostMode(lhsTheme, lhsText, lhsValue):
+                if case let .ghostMode(rhsTheme, rhsText, rhsValue) = rhs, lhsTheme === rhsTheme, lhsText == rhsText, lhsValue == rhsValue {
+                    return true
+                } else {
+                    return false
+                }
+            case let .ghostModeInfo(lhsTheme, lhsText):
+                if case let .ghostModeInfo(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
+                    return true
+                } else {
+                    return false
+                }
+            case let .misc(lhsTheme, lhsText, lhsValue):
+                if case let .misc(rhsTheme, rhsText, rhsValue) = rhs, lhsTheme === rhsTheme, lhsText == rhsText, lhsValue == rhsValue {
+                    return true
+                } else {
+                    return false
+                }
+            case let .miscInfo(lhsTheme, lhsText):
+                if case let .miscInfo(rhsTheme, rhsText) = rhs, lhsTheme === rhsTheme, lhsText == rhsText {
+                    return true
+                } else {
+                    return false
+                }
         }
     }
     
@@ -541,6 +610,24 @@ private enum PrivacyAndSecurityEntry: ItemListNodeEntry {
                     arguments.openDataSettings()
                 })
             case let .dataSettingsInfo(_, text):
+                return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
+            case let .deletedMessages(_, text, value):
+                return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: UIImage(bundleImageName: "Settings/Menu/Timer")?.precomposed(), title: text, label: value, sectionId: self.section, style: .blocks, action: {
+                    arguments.openDeletedMessages()
+                })
+            case let .deletedMessagesInfo(_, text):
+                return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
+            case let .ghostMode(_, text, value):
+                return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: UIImage(bundleImageName: "Settings/Menu/Appearance")?.precomposed(), title: text, label: value, sectionId: self.section, style: .blocks, action: {
+                    arguments.openGhostMode()
+                })
+            case let .ghostModeInfo(_, text):
+                return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
+            case let .misc(_, text, value):
+                return ItemListDisclosureItem(presentationData: presentationData, systemStyle: .glass, icon: UIImage(bundleImageName: "Settings/Menu/Storage")?.precomposed(), title: text, label: value, sectionId: self.section, style: .blocks, action: {
+                    arguments.openMisc()
+                })
+            case let .miscInfo(_, text):
                 return ItemListTextItem(presentationData: presentationData, text: .plain(text), sectionId: self.section)
         }
     }
@@ -1406,10 +1493,10 @@ public func privacyAndSecurityController(
             let presentationData = context.sharedContext.currentPresentationData.with { $0 }
             let controller = textAlertController(
                 context: context, title: emailPattern, text: presentationData.strings.PrivacySettings_LoginEmailAlertText, actions: [
-                    TextAlertAction(type: .genericAction, title: presentationData.strings.PrivacySettings_LoginEmailAlertChange, action: {
+                    TextAlertAction(type: .defaultAction, title: presentationData.strings.PrivacySettings_LoginEmailAlertChange, action: {
                         setupEmailImpl?(emailPattern)
                     }),
-                    TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_Cancel, action: {
+                    TextAlertAction(type: .genericAction, title: presentationData.strings.Common_Cancel, action: {
                                         
                     })
                 ], actionLayout: .vertical
@@ -1497,6 +1584,12 @@ public func privacyAndSecurityController(
                 }), true)
             }
         }))
+    }, openDeletedMessages: {
+        pushControllerImpl?(deletedMessagesController(context: context), true)
+    }, openGhostMode: {
+        pushControllerImpl?(ghostModeController(context: context), true)
+    }, openMisc: {
+        pushControllerImpl?(miscController(context: context), true)
     })
     
     actionsDisposable.add(context.engine.peers.managedUpdatedRecentPeers().start())

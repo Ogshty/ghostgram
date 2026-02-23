@@ -1020,6 +1020,8 @@ private func finalStateWithUpdatesAndServerTime(accountPeerId: PeerId, postbox: 
                 let peerId = PeerId(namespace: Namespaces.Peer.CloudChannel, id: PeerId.Id._internalFromInt64Value(channelId))
                 updatedState.updateMinAvailableMessage(MessageId(peerId: peerId, namespace: Namespaces.Message.Cloud, id: minId))
             case let .updateDeleteMessages(messages, _, _):
+                // Note: Actual archiving happens in DeleteMessagesWithGlobalIds handler
+                // where we have access to transaction and can get full message content
                 updatedState.deleteMessagesWithGlobalIds(messages)
             case let .updatePinnedMessages(flags, peer, messages, _, _):
                 let peerId = peer.peerId
@@ -1906,6 +1908,8 @@ private func finalStateWithUpdatesAndServerTime(accountPeerId: PeerId, postbox: 
                 }
             case let .updateStarGiftAuctionUserState(giftId, userState):
                 updatedState.updateStarGiftAuctionMyState(giftId: giftId, state: GiftAuctionContext.State.MyState(apiAuctionUserState: userState))
+            case let .updateEmojiGameInfo(info):
+                updatedState.updateEmojiGameInfo(info: EmojiGameInfo(apiEmojiGameInfo: info))
             default:
                 break
         }
@@ -3629,7 +3633,7 @@ private func optimizedOperations(_ operations: [AccountStateMutationOperation]) 
     var currentAddQuickReplyMessages: OptimizeAddMessagesState?
     for operation in operations {
         switch operation {
-        case .DeleteMessages, .DeleteMessagesWithGlobalIds, .EditMessage, .UpdateMessagePoll, .UpdateMessageReactions, .UpdateMedia, .MergeApiChats, .MergeApiUsers, .MergePeerPresences, .UpdatePeer, .ReadInbox, .ReadOutbox, .ReadGroupFeedInbox, .ResetReadState, .ResetIncomingReadState, .UpdatePeerChatUnreadMark, .ResetMessageTagSummary, .UpdateNotificationSettings, .UpdateGlobalNotificationSettings, .UpdateSecretChat, .AddSecretMessages, .ReadSecretOutbox, .AddPeerInputActivity, .AddPeerLiveTypingDraftUpdate, .UpdateCachedPeerData, .UpdatePinnedItemIds, .UpdatePinnedSavedItemIds, .UpdatePinnedTopic, .UpdatePinnedTopicOrder, .ReadMessageContents, .UpdateMessageImpressionCount, .UpdateMessageForwardsCount, .UpdateInstalledStickerPacks, .UpdateRecentGifs, .UpdateChatInputState, .UpdateCall, .AddCallSignalingData, .UpdateLangPack, .UpdateMinAvailableMessage, .UpdateIsContact, .UpdatePeerChatInclusion, .UpdatePeersNearby, .UpdateTheme, .SyncChatListFilters, .UpdateChatListFilter, .UpdateChatListFilterOrder, .UpdateReadThread, .UpdateMessagesPinned, .UpdateGroupCallParticipants, .UpdateGroupCall, .UpdateGroupCallChainBlocks, .UpdateGroupCallMessage, .UpdateGroupCallOpaqueMessage, .UpdateAutoremoveTimeout, .UpdateAttachMenuBots, .UpdateAudioTranscription, .UpdateConfig, .UpdateExtendedMedia, .ResetForumTopic, .UpdateStory, .UpdateReadStories, .UpdateStoryStealthMode, .UpdateStorySentReaction, .UpdateNewAuthorization, .UpdateWallpaper, .UpdateStarsBalance, .UpdateStarsRevenueStatus, .UpdateStarsReactionsDefaultPrivacy, .ReportMessageDelivery, .UpdateMonoForumNoPaidException, .UpdateStarGiftAuctionState, .UpdateStarGiftAuctionMyState:
+        case .DeleteMessages, .DeleteMessagesWithGlobalIds, .EditMessage, .UpdateMessagePoll, .UpdateMessageReactions, .UpdateMedia, .MergeApiChats, .MergeApiUsers, .MergePeerPresences, .UpdatePeer, .ReadInbox, .ReadOutbox, .ReadGroupFeedInbox, .ResetReadState, .ResetIncomingReadState, .UpdatePeerChatUnreadMark, .ResetMessageTagSummary, .UpdateNotificationSettings, .UpdateGlobalNotificationSettings, .UpdateSecretChat, .AddSecretMessages, .ReadSecretOutbox, .AddPeerInputActivity, .AddPeerLiveTypingDraftUpdate, .UpdateCachedPeerData, .UpdatePinnedItemIds, .UpdatePinnedSavedItemIds, .UpdatePinnedTopic, .UpdatePinnedTopicOrder, .ReadMessageContents, .UpdateMessageImpressionCount, .UpdateMessageForwardsCount, .UpdateInstalledStickerPacks, .UpdateRecentGifs, .UpdateChatInputState, .UpdateCall, .AddCallSignalingData, .UpdateLangPack, .UpdateMinAvailableMessage, .UpdateIsContact, .UpdatePeerChatInclusion, .UpdatePeersNearby, .UpdateTheme, .SyncChatListFilters, .UpdateChatListFilter, .UpdateChatListFilterOrder, .UpdateReadThread, .UpdateMessagesPinned, .UpdateGroupCallParticipants, .UpdateGroupCall, .UpdateGroupCallChainBlocks, .UpdateGroupCallMessage, .UpdateGroupCallOpaqueMessage, .UpdateAutoremoveTimeout, .UpdateAttachMenuBots, .UpdateAudioTranscription, .UpdateConfig, .UpdateExtendedMedia, .ResetForumTopic, .UpdateStory, .UpdateReadStories, .UpdateStoryStealthMode, .UpdateStorySentReaction, .UpdateNewAuthorization, .UpdateWallpaper, .UpdateStarsBalance, .UpdateStarsRevenueStatus, .UpdateStarsReactionsDefaultPrivacy, .ReportMessageDelivery, .UpdateMonoForumNoPaidException, .UpdateStarGiftAuctionState, .UpdateStarGiftAuctionMyState, .UpdateEmojiGameInfo:
                 if let currentAddMessages = currentAddMessages, !currentAddMessages.messages.isEmpty {
                     result.append(.AddMessages(currentAddMessages.messages, currentAddMessages.location))
                 }
@@ -3772,6 +3776,7 @@ func replayFinalState(
     var reportMessageDelivery = Set<MessageId>()
     var updatedStarGiftAuctionState: [Int64: GiftAuctionContext.State.AuctionState] = [:]
     var updatedStarGiftAuctionMyState: [Int64: GiftAuctionContext.State.MyState] = [:]
+    var updatedEmojiGameInfo: EmojiGameInfo?
     
     var holesFromPreviousStateMessageIds: [MessageId] = []
     var clearHolesFromPreviousStateForChannelMessagesWithPts: [PeerIdAndMessageNamespace: Int32] = [:]
@@ -4224,18 +4229,166 @@ func replayFinalState(
                     }
                 }
             case let .DeleteMessagesWithGlobalIds(ids):
-                var resourceIds: [MediaResourceId] = []
-                transaction.deleteMessagesWithGlobalIds(ids, forEachMedia: { media in
-                    addMessageMediaResourceIdsToRemove(media: media, resourceIds: &resourceIds)
-                })
-                if !resourceIds.isEmpty {
-                    let _ = mediaBox.removeCachedResources(Array(Set(resourceIds)), force: true).start()
+                // ANTI-DELETE: Archive messages with full content before deletion
+                if AntiDeleteManager.shared.isEnabled {
+                    let messageIds = transaction.messageIdsForGlobalIds(ids)
+                    for (index, messageId) in messageIds.enumerated() {
+                        if let message = transaction.getMessage(messageId) {
+                            let globalId = index < ids.count ? ids[index] : 0
+                            
+                            // Extract text content
+                            let textContent = message.text
+                            
+                            // Extract media description
+                            var mediaDesc: String? = nil
+                            for media in message.media {
+                                switch media {
+                                case let image as TelegramMediaImage:
+                                    mediaDesc = "📷 Photo"
+                                    if let largest = image.representations.last {
+                                        mediaDesc = "📷 Photo \(largest.dimensions.width)x\(largest.dimensions.height)"
+                                    }
+                                case let file as TelegramMediaFile:
+                                    if file.isVideo {
+                                        mediaDesc = "🎬 Video"
+                                    } else if file.isVoice {
+                                        mediaDesc = "🎤 Voice Message"
+                                    } else if file.isInstantVideo {
+                                        mediaDesc = "📹 Video Message"
+                                    } else if file.isSticker {
+                                        mediaDesc = "🎭 Sticker"
+                                    } else {
+                                        mediaDesc = "📎 \(file.fileName ?? "File")"
+                                    }
+                                case is TelegramMediaContact:
+                                    mediaDesc = "👤 Contact"
+                                case is TelegramMediaMap:
+                                    mediaDesc = "📍 Location"
+                                case let poll as TelegramMediaPoll:
+                                    mediaDesc = "📊 Poll: \(poll.text)"
+                                default:
+                                    break
+                                }
+                            }
+                            
+                            AntiDeleteManager.shared.archiveMessage(
+                                globalId: globalId,
+                                peerId: messageId.peerId.toInt64(),
+                                messageId: messageId.id,
+                                timestamp: message.timestamp,
+                                authorId: message.author?.id.toInt64(),
+                                text: textContent,
+                                forwardAuthorId: message.forwardInfo?.author?.id.toInt64(),
+                                mediaDescription: mediaDesc
+                            )
+                        }
+                    }
+                }
+                
+                // ANTI-DELETE: Mark messages as deleted instead of removing them
+                if AntiDeleteManager.shared.isEnabled {
+                    let messageIds = transaction.messageIdsForGlobalIds(ids)
+                    for messageId in messageIds {
+                        // Mark as deleted for icon display
+                        AntiDeleteManager.shared.markAsDeleted(peerId: messageId.peerId.toInt64(), messageId: messageId.id)
+                        
+                        transaction.updateMessage(messageId, update: { currentMessage in
+                            var attributes = currentMessage.attributes
+                            // Don't add duplicate DeletedMessageAttribute
+                            if !attributes.contains(where: { $0 is DeletedMessageAttribute }) {
+                                attributes.append(DeletedMessageAttribute(deletedAt: Int32(Date().timeIntervalSince1970)))
+                            }
+                            let storeForwardInfo = currentMessage.forwardInfo.flatMap(StoreMessageForwardInfo.init)
+                            // Keep original text, no prefix needed - icon will show deleted status
+                            return .update(StoreMessage(id: currentMessage.id, customStableId: nil, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: currentMessage.text, attributes: attributes, media: currentMessage.media))
+                        })
+                    }
+                } else {
+                    var resourceIds: [MediaResourceId] = []
+                    transaction.deleteMessagesWithGlobalIds(ids, forEachMedia: { media in
+                        addMessageMediaResourceIdsToRemove(media: media, resourceIds: &resourceIds)
+                    })
+                    if !resourceIds.isEmpty {
+                        let _ = mediaBox.removeCachedResources(Array(Set(resourceIds)), force: true).start()
+                    }
                 }
                 deletedMessageIds.append(contentsOf: ids.map { .global($0) })
             case let .DeleteMessages(ids):
-                _internal_deleteMessages(transaction: transaction, mediaBox: mediaBox, ids: ids, manualAddMessageThreadStatsDifference: { id, add, remove in
-                    addMessageThreadStatsDifference(threadKey: id, remove: remove, addedMessagePeer: nil, addedMessageId: nil, isOutgoing: false)
-                })
+                // ANTI-DELETE: Archive channel messages with full content before deletion
+                if AntiDeleteManager.shared.isEnabled {
+                    for messageId in ids {
+                        if let message = transaction.getMessage(messageId) {
+                            // Extract text content
+                            let textContent = message.text
+                            
+                            // Extract media description
+                            var mediaDesc: String? = nil
+                            for media in message.media {
+                                switch media {
+                                case let image as TelegramMediaImage:
+                                    mediaDesc = "📷 Photo"
+                                    if let largest = image.representations.last {
+                                        mediaDesc = "📷 Photo \(largest.dimensions.width)x\(largest.dimensions.height)"
+                                    }
+                                case let file as TelegramMediaFile:
+                                    if file.isVideo {
+                                        mediaDesc = "🎬 Video"
+                                    } else if file.isVoice {
+                                        mediaDesc = "🎤 Voice Message"
+                                    } else if file.isInstantVideo {
+                                        mediaDesc = "📹 Video Message"
+                                    } else if file.isSticker {
+                                        mediaDesc = "🎭 Sticker"
+                                    } else {
+                                        mediaDesc = "📎 \(file.fileName ?? "File")"
+                                    }
+                                case is TelegramMediaContact:
+                                    mediaDesc = "👤 Contact"
+                                case is TelegramMediaMap:
+                                    mediaDesc = "📍 Location"
+                                case let poll as TelegramMediaPoll:
+                                    mediaDesc = "📊 Poll: \(poll.text)"
+                                default:
+                                    break
+                                }
+                            }
+                            
+                            AntiDeleteManager.shared.archiveMessage(
+                                globalId: messageId.id, // Use message id as globalId for channel messages
+                                peerId: messageId.peerId.toInt64(),
+                                messageId: messageId.id,
+                                timestamp: message.timestamp,
+                                authorId: message.author?.id.toInt64(),
+                                text: textContent,
+                                forwardAuthorId: message.forwardInfo?.author?.id.toInt64(),
+                                mediaDescription: mediaDesc
+                            )
+                        }
+                    }
+                }
+                
+                // ANTI-DELETE: Mark messages as deleted instead of removing them
+                if AntiDeleteManager.shared.isEnabled {
+                    for messageId in ids {
+                        // Mark as deleted for icon display
+                        AntiDeleteManager.shared.markAsDeleted(peerId: messageId.peerId.toInt64(), messageId: messageId.id)
+                        
+                        transaction.updateMessage(messageId, update: { currentMessage in
+                            var attributes = currentMessage.attributes
+                            // Don't add duplicate DeletedMessageAttribute
+                            if !attributes.contains(where: { $0 is DeletedMessageAttribute }) {
+                                attributes.append(DeletedMessageAttribute(deletedAt: Int32(Date().timeIntervalSince1970)))
+                            }
+                            let storeForwardInfo = currentMessage.forwardInfo.flatMap(StoreMessageForwardInfo.init)
+                            // Keep original text, no prefix needed - icon will show deleted status
+                            return .update(StoreMessage(id: currentMessage.id, customStableId: nil, globallyUniqueId: currentMessage.globallyUniqueId, groupingKey: currentMessage.groupingKey, threadId: currentMessage.threadId, timestamp: currentMessage.timestamp, flags: StoreMessageFlags(currentMessage.flags), tags: currentMessage.tags, globalTags: currentMessage.globalTags, localTags: currentMessage.localTags, forwardInfo: storeForwardInfo, authorId: currentMessage.author?.id, text: currentMessage.text, attributes: attributes, media: currentMessage.media))
+                        })
+                    }
+                } else {
+                    _internal_deleteMessages(transaction: transaction, mediaBox: mediaBox, ids: ids, manualAddMessageThreadStatsDifference: { id, add, remove in
+                        addMessageThreadStatsDifference(threadKey: id, remove: remove, addedMessagePeer: nil, addedMessageId: nil, isOutgoing: false)
+                    })
+                }
                 deletedMessageIds.append(contentsOf: ids.map { .messageId($0) })
             case let .UpdateMinAvailableMessage(id):
                 if let message = transaction.getMessage(id) {
@@ -4294,6 +4447,14 @@ func replayFinalState(
                                 updatedAttributes.append(translation)
                             }
                         }
+                    } else {
+                        // GHOSTGRAM: Save original text before edit
+                        EditHistoryManager.shared.saveOriginalText(
+                            peerId: id.peerId.toInt64(),
+                            messageId: id.id,
+                            originalText: previousMessage.text,
+                            editDate: Int32(Date().timeIntervalSince1970)
+                        )
                     }
                     
                     if let previousFactCheckAttribute = previousMessage.attributes.first(where: { $0 is FactCheckMessageAttribute }) as? FactCheckMessageAttribute, let updatedFactCheckAttribute = message.attributes.first(where: { $0 is FactCheckMessageAttribute }) as? FactCheckMessageAttribute {
@@ -5339,6 +5500,8 @@ func replayFinalState(
                 updatedStarGiftAuctionState[giftId] = state
             case let .UpdateStarGiftAuctionMyState(giftId, state):
                 updatedStarGiftAuctionMyState[giftId] = state
+            case let .UpdateEmojiGameInfo(info):
+                updatedEmojiGameInfo = info
         }
     }
     
@@ -5889,6 +6052,7 @@ func replayFinalState(
         reportMessageDelivery: reportMessageDelivery,
         addedConferenceInvitationMessagesIds: addedConferenceInvitationMessagesIds,
         updatedStarGiftAuctionState: updatedStarGiftAuctionState,
-        updatedStarGiftAuctionMyState: updatedStarGiftAuctionMyState
+        updatedStarGiftAuctionMyState: updatedStarGiftAuctionMyState,
+        updatedEmojiGameInfo: updatedEmojiGameInfo
     )
 }

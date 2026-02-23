@@ -51,6 +51,11 @@ func _internal_markMessageContentAsConsumedInteractively(postbox: Postbox, messa
             for i in 0 ..< updatedAttributes.count {
                 if let attribute = updatedAttributes[i] as? AutoremoveTimeoutMessageAttribute {
                     if attribute.countdownBeginTime == nil || attribute.countdownBeginTime == 0 {
+                        // MISC: Don't start countdown for view-once if bypass enabled
+                        if attribute.timeout == viewOnceTimeout && MiscSettingsManager.shared.shouldDisableViewOnceAutoDelete {
+                            continue
+                        }
+                        
                         var timeout = attribute.timeout
                         if let duration = message.secretMediaDuration {
                             timeout = max(timeout, Int32(duration))
@@ -194,7 +199,9 @@ func markMessageContentAsConsumedRemotely(transaction: Transaction, messageId: M
                                  
                     if message.id.peerId.namespace == Namespaces.Peer.SecretChat {
                     } else {
-                        if attribute.timeout == viewOnceTimeout || timestamp >= countdownBeginTime + attribute.timeout {
+                        // MISC: Don't expire view-once media if bypass enabled
+                        let shouldExpire = !(attribute.timeout == viewOnceTimeout && MiscSettingsManager.shared.shouldDisableViewOnceAutoDelete)
+                        if shouldExpire && (attribute.timeout == viewOnceTimeout || timestamp >= countdownBeginTime + attribute.timeout) {
                             for i in 0 ..< updatedMedia.count {
                                 if let _ = updatedMedia[i] as? TelegramMediaImage {
                                     updatedMedia[i] = TelegramMediaExpiredContent(data: .image)

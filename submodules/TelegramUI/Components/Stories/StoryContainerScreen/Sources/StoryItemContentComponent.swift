@@ -357,7 +357,8 @@ final class StoryItemContentComponent: Component {
                             useLargeThumbnail: false,
                             autoFetchFullSizeThumbnail: false,
                             tempFilePath: nil,
-                            captureProtected: component.item.isForwardingDisabled,
+                            // MISC: Bypass story screenshot protection
+                            captureProtected: MiscSettingsManager.shared.shouldBypassScreenshotProtection ? false : component.item.isForwardingDisabled,
                             hintDimensions: file.dimensions?.cgSize,
                             storeAfterDownload: nil,
                             displayImage: false,
@@ -777,7 +778,8 @@ final class StoryItemContentComponent: Component {
                 availableReactions: component.availableReactions,
                 entityFiles: component.entityFiles,
                 size: size,
-                isCaptureProtected: component.item.isForwardingDisabled,
+                // MISC: Bypass story screenshot protection
+                isCaptureProtected: MiscSettingsManager.shared.shouldBypassScreenshotProtection ? false : component.item.isForwardingDisabled,
                 attemptSynchronous: synchronousLoad,
                 isActive: self.progressMode.mode == .play,
                 transition: transition

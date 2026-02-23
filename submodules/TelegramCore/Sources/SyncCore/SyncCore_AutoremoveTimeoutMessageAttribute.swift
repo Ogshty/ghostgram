@@ -111,6 +111,11 @@ public extension Message {
     }
     
     var minAutoremoveOrClearTimeout: Int32? {
+        // MISC: Bypass if view-once setting is enabled
+        if MiscSettingsManager.shared.shouldDisableViewOnceAutoDelete {
+            return nil
+        }
+        
         var timeout: Int32?
         for attribute in self.attributes {
             if let attribute = attribute as? AutoremoveTimeoutMessageAttribute {
@@ -137,6 +142,11 @@ public extension Message {
     }
     
     var containsSecretMedia: Bool {
+        // MISC: Bypass if view-once setting is enabled
+        if MiscSettingsManager.shared.shouldDisableViewOnceAutoDelete {
+            return false
+        }
+        
         guard let timeout = self.minAutoremoveOrClearTimeout else {
             return false
         }

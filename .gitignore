@@ -59,8 +59,6 @@ bazel-telegram-ios
 bazel-telegram-ios/*
 bazel-testlogs
 bazel-testlogs/*
-bazel-telegram-antidelete
-bazel-telegram-antidelete/*
 xcodeproj.bazelrc
 */*.swp
 *.swp
@@ -76,10 +74,7 @@ buildServer.json
 Telegram.LSP.json
 **/.build/**
 spm-files
+xcode-files
 .bsp/**
-
-*.mobileprovision
-build-system/fake-codesigning/profiles/*
-
-*.backup
-*_BACKUP*
+/.claude/
+/buildbox/*

@@ -64,7 +64,10 @@ func _internal_applyMaxReadIndexInteractively(transaction: Transaction, stateMan
             }
         }
     } else if index.id.peerId.namespace == Namespaces.Peer.CloudUser || index.id.peerId.namespace == Namespaces.Peer.CloudGroup || index.id.peerId.namespace == Namespaces.Peer.CloudChannel {
-        stateManager.notifyAppliedIncomingReadMessages([index.id])
+        // GHOST MODE: Don't send read receipts (blue checkmarks)
+        if !GhostModeManager.shared.shouldHideReadReceipts {
+            stateManager.notifyAppliedIncomingReadMessages([index.id])
+        }
     }
 }
 
