@@ -861,7 +861,8 @@ extension ChatControllerImpl {
         
         self.reloadCachedData()
         
-        if self.context.sharedContext.immediateExperimentalUISettings.crashOnLongQueries {
+        if self.context.sharedContext.immediateExperimentalUISettings.crashOnLongQueries,
+           case .internal = self.context.sharedContext.applicationBindings.appBuildType {
             let _ = (self.ready.get()
             |> filter({ $0 })
             |> take(1)
@@ -1509,7 +1510,7 @@ extension ChatControllerImpl {
                                             guard let targetView = itemNode.targetReactionView(value: updatedReaction) else {
                                                 return
                                             }
-                                            if let reactionItem = reactionItem {
+                                            if let reactionItem = reactionItem, let controllerInteraction = strongSelf.controllerInteraction {
                                                 let standaloneReactionAnimation = StandaloneReactionAnimation(genericReactionEffect: strongSelf.chatDisplayNode.historyNode.takeGenericReactionEffect())
                                                 
                                                 strongSelf.chatDisplayNode.messageTransitionNode.addMessageStandaloneReactionAnimation(messageId: item.message.id, standaloneReactionAnimation: standaloneReactionAnimation)
@@ -1519,7 +1520,7 @@ extension ChatControllerImpl {
                                                 standaloneReactionAnimation.animateReactionSelection(
                                                     context: strongSelf.context,
                                                     theme: strongSelf.presentationData.theme,
-                                                    animationCache: strongSelf.controllerInteraction!.presentationContext.animationCache,
+                                                    animationCache: controllerInteraction.presentationContext.animationCache,
                                                     reaction: reactionItem,
                                                     avatarPeers: avatarPeers,
                                                     playHaptic: true,

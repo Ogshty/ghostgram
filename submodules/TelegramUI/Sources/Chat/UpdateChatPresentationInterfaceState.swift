@@ -200,7 +200,9 @@ func updateChatPresentationInterfaceStateImpl(
     } else {
         isBot = false
     }
-    selfController.chatDisplayNode.historyNode.chatHasBots = updatedChatPresentationInterfaceState.hasBots || isBot
+    if selfController.isNodeLoaded {
+        selfController.chatDisplayNode.historyNode.chatHasBots = updatedChatPresentationInterfaceState.hasBots || isBot
+    }
     
     if let (updatedSearchQuerySuggestionState, updatedSearchQuerySuggestionSignal) = searchQuerySuggestionResultStateForChatInterfacePresentationState(updatedChatPresentationInterfaceState, context: selfController.context, currentQuery: selfController.searchQuerySuggestionState?.0) {
         selfController.searchQuerySuggestionState?.1.dispose()
@@ -444,11 +446,13 @@ func updateChatPresentationInterfaceStateImpl(
     
     selfController.updateSlowmodeStatus()
     
-    switch updatedChatPresentationInterfaceState.inputMode {
-    case .media:
-        break
-    default:
-        selfController.chatDisplayNode.collapseInput()
+    if selfController.isNodeLoaded {
+        switch updatedChatPresentationInterfaceState.inputMode {
+        case .media:
+            break
+        default:
+            selfController.chatDisplayNode.collapseInput()
+        }
     }
     
     selfController.tempHideAccessoryPanels = selfController.presentationInterfaceState.search != nil
@@ -559,7 +563,9 @@ func updateChatPresentationInterfaceStateImpl(
                 }
                 (selfController.navigationController as? NavigationController)?.updateMasterDetailsBlackout(isBlackout ? .master : nil, transition: transition)
             }
-            selfController.updateItemNodesSelectionStates(animated: transition.isAnimated)
+            if selfController.isNodeLoaded {
+                selfController.updateItemNodesSelectionStates(animated: transition.isAnimated)
+            }
         }
     }
     
@@ -583,16 +589,20 @@ func updateChatPresentationInterfaceStateImpl(
      
     selfController.presentationInterfaceStatePromise.set(selfController.presentationInterfaceState)
     
-    if case .tag = selfController.chatDisplayNode.historyNode.tag {
-    } else {
-        if let historyFilter = selfController.presentationInterfaceState.historyFilter, historyFilter.isActive {
-            selfController.chatDisplayNode.historyNode.updateTag(tag: .customTag(historyFilter.customTag, nil))
+    if selfController.isNodeLoaded {
+        if case .tag = selfController.chatDisplayNode.historyNode.tag {
         } else {
-            selfController.chatDisplayNode.historyNode.updateTag(tag: nil)
+            if let historyFilter = selfController.presentationInterfaceState.historyFilter, historyFilter.isActive {
+                selfController.chatDisplayNode.historyNode.updateTag(tag: .customTag(historyFilter.customTag, nil))
+            } else {
+                selfController.chatDisplayNode.historyNode.updateTag(tag: nil)
+            }
         }
     }
     
-    selfController.updateDownButtonVisibility()
+    if selfController.isNodeLoaded {
+        selfController.updateDownButtonVisibility()
+    }
     
     if selfController.presentationInterfaceState.hasBirthdayToday {
         selfController.displayBirthdayTooltip()

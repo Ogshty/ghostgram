@@ -78,3 +78,9 @@ xcode-files
 .bsp/**
 /.claude/
 /buildbox/*
+
+# Local/private signing materials (keep fake-codesigning tracked)
+/.profiles/
+/codesigning/
+/build-system/real-codesigning/
+/build-system/local-codesigning/
