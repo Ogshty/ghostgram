@@ -3,11 +3,11 @@ name: CI - Build Telegram iOS (Unsigned)
 on:
   push:
     branches: [ master, main ]
-  workflow_dispatch:          # позволяет запускать сборку вручную
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-15         # Рекомендуется macos-15 или latest для стабильности в 2026
+    runs-on: macos-15
 
     steps:
       - name: Checkout code with submodules
@@ -20,13 +20,13 @@ jobs:
         run: |
           if [ -f versions.json ]; then
             XCODE_VERSION=$(python3 -c '
-import json, sys
-try:
-    with open("versions.json") as f:
-        data = json.load(f)
-    print(data.get("xcode", "16.0"))
-except Exception:
-    print("16.0")
+          import json, sys
+          try:
+              with open("versions.json") as f:
+                  data = json.load(f)
+              print(data.get("xcode", "16.0"))
+          except Exception:
+              print("16.0")
             ')
             echo "🔧 Using Xcode $XCODE_VERSION"
             sudo xcode-select -s "/Applications/Xcode_$XCODE_VERSION.app/Contents/Developer"
@@ -45,14 +45,12 @@ except Exception:
       - name: Build Telegram IPA
         run: |
           set -x
-
           SOURCE_DIR="/Users/Shared/telegram-ios"
           BAZEL_USER_ROOT="/private/var/tmp/_bazel_containerhost"
           OUTPUT_PATH="$SOURCE_DIR/build/artifacts"
 
           cd "$SOURCE_DIR"
 
-          # Определяем версию и номер сборки
           if [ -f build_number_offset ]; then
             BUILD_NUMBER_OFFSET=$(cat build_number_offset)
           else
@@ -60,13 +58,13 @@ except Exception:
           fi
 
           APP_VERSION=$(python3 -c '
-import json, sys
-try:
-    with open("versions.json") as f:
-        data = json.load(f)
-    print(data.get("app", "unknown"))
-except Exception:
-    print("unknown")
+          import json, sys
+          try:
+              with open("versions.json") as f:
+                  data = json.load(f)
+              print(data.get("app", "unknown"))
+          except Exception:
+              print("unknown")
           ')
 
           COMMIT_COUNT=$(git rev-list --count HEAD)
@@ -75,12 +73,8 @@ except Exception:
           echo "APP_VERSION=$APP_VERSION" >> $GITHUB_ENV
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> $GITHUB_ENV
 
-          echo "📦 Building version: $APP_VERSION ($BUILD_NUMBER)"
-
-          # Импорт фейковых сертификатов для сборки без настоящей подписи
           python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
 
-          # Основная сборка
           python3 -u build-system/Make/Make.py \
             --bazelUserRoot="$BAZEL_USER_ROOT" \
             build \
@@ -89,13 +83,8 @@ except Exception:
             --configuration=release_arm64 \
             --buildNumber="$BUILD_NUMBER"
 
-          # Создаём папку для артефактов
           mkdir -p "$OUTPUT_PATH"
-
-          # Копируем IPA
           find bazel-out -name "Telegram.ipa" -exec cp {} "$OUTPUT_PATH/Telegram.ipa" \;
-
-          # Копируем DSYM
           mkdir -p "$SOURCE_DIR/build/DSYMs"
           find bazel-out -name "*.dSYM" -exec cp -R {} "$SOURCE_DIR/build/DSYMs/" \;
 
