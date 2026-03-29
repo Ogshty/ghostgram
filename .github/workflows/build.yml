@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-26         # актуальный раннер 2026 года (Apple Silicon, самый быстрый)
+    runs-on: macos-15         # Рекомендуется macos-15 или latest для стабильности в 2026
 
     steps:
       - name: Checkout code with submodules
@@ -21,9 +21,12 @@ jobs:
           if [ -f versions.json ]; then
             XCODE_VERSION=$(python3 -c '
 import json, sys
-with open("versions.json") as f:
-    data = json.load(f)
-print(data.get("xcode", "16.0"))
+try:
+    with open("versions.json") as f:
+        data = json.load(f)
+    print(data.get("xcode", "16.0"))
+except Exception:
+    print("16.0")
             ')
             echo "🔧 Using Xcode $XCODE_VERSION"
             sudo xcode-select -s "/Applications/Xcode_$XCODE_VERSION.app/Contents/Developer"
@@ -58,9 +61,12 @@ print(data.get("xcode", "16.0"))
 
           APP_VERSION=$(python3 -c '
 import json, sys
-with open("versions.json") as f:
-    data = json.load(f)
-print(data.get("app", "unknown"))
+try:
+    with open("versions.json") as f:
+        data = json.load(f)
+    print(data.get("app", "unknown"))
+except Exception:
+    print("unknown")
           ')
 
           COMMIT_COUNT=$(git rev-list --count HEAD)
@@ -89,6 +95,12 @@ print(data.get("app", "unknown"))
           # Копируем IPA
           find bazel-out -name "Telegram.ipa" -exec cp {} "$OUTPUT_PATH/Telegram.ipa" \;
 
-          # Копируем и архивируем DSYM (полезно для отладки)
+          # Копируем DSYM
           mkdir -p "$SOURCE_DIR/build/DSYMs"
-          find bazel-out -name "*.dSYM" -exec cp
+          find bazel-out -name "*.dSYM" -exec cp -R {} "$SOURCE_DIR/build/DSYMs/" \;
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Telegram-iOS-Unsigned
+          path: /Users/Shared/telegram-ios/build/artifacts/Telegram.ipa
